@@ -9,6 +9,7 @@
 
 #include "atom/common/api/locker.h"
 #include "atom/common/native_mate_converters/callback.h"
+#include "base/task/post_task.h"
 #include "content/public/browser/browser_thread.h"
 #include "native_mate/converter.h"
 
@@ -37,6 +38,38 @@ class Promise {
   v8::Isolate* isolate() const { return isolate_; }
   v8::Local<v8::Context> GetContext() {
     return v8::Local<v8::Context>::New(isolate_, context_);
+  }
+
+  template <typename T>
+  static void ResolutionBinder(Promise promise, base::Optional<T> result) {
+    (result) ? promise.Resolve(result.value()) : promise.Resolve();
+  }
+
+  template <typename T>
+  static void ResolvePromise(Promise promise, base::Optional<T> result) {
+    if (!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI)) {
+      base::PostTaskWithTraits(
+          FROM_HERE, {content::BrowserThread::UI},
+          base::BindOnce(&ResolutionBinder<T>, std::move(promise), result));
+    } else {
+      ResolutionBinder(promise, result);
+    }
+  }
+
+  template <typename T>
+  static void RejectionBinder(Promise promise, base::Optional<T> result) {
+    (result) ? promise.Resolve(result.value()) : promise.Resolve();
+  }
+
+  template <typename T>
+  static void RejectPromise(Promise promise, base::Optional<T> result) {
+    if (!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI)) {
+      base::PostTaskWithTraits(
+          FROM_HERE, {content::BrowserThread::UI},
+          base::BindOnce(&RejectionBinder<T>, std::move(promise), result));
+    } else {
+      RejectionBinder(promise, result);
+    }
   }
 
   v8::Local<v8::Promise> GetHandle() const;
@@ -124,6 +157,13 @@ class CopyablePromise {
   explicit CopyablePromise(const Promise& promise);
   CopyablePromise(const CopyablePromise&);
   ~CopyablePromise();
+
+  template <typename T>
+  static void CopyableResolverBinder(const CopyablePromise& promise,
+                                     base::Optional<T> result) {
+    (result) ? promise.GetPromise().Resolve(result.value())
+             : promise.GetPromise().Resolve();
+  }
 
   Promise GetPromise() const;
 
